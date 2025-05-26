@@ -11,7 +11,9 @@ Large Language Models (LLMs) often struggle with effective self-correction in co
 1. **Program-driven Verification (ProgVe)**  
    Enables LLMs to self-generate and self-execute verification pseudo-programs that validate responses using code-structured logic and reverse reasoning.
 
-![Verification Pseudo-program Introduction](figs/introduction.png){: width="60%" .center-image}
+<img src="figs/introduction.png" 
+     alt="Verification Pseudo-program Introduction" 
+     style="width:60%; height:auto; display:block; margin:0 auto;" />
   
 ![Verification Pseudo-program Introduction](figs/introduction.png)
 
