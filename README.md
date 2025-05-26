@@ -96,4 +96,4 @@ If you use ProgCo in your research, please cite our work:
 
 ---
 
-**Contact**: For questions and suggestions, please contact Xiaoshuai Song at [lixing.wyn@alibaba-inc.com](mailto:songxiaoshuai.sxs@alibaba-inc.com) or Yanan Wu at [lixing.wyn@alibaba-inc.com](mailto:lixing.wyn@alibaba-inc.com).
+**Contact**: For questions and suggestions, please contact Xiaoshuai Song at [songxiaoshuai.sxs@alibaba-inc.com](mailto:songxiaoshuai.sxs@alibaba-inc.com) or Yanan Wu at [lixing.wyn@alibaba-inc.com](mailto:lixing.wyn@alibaba-inc.com).
