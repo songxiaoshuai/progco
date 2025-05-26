@@ -87,7 +87,7 @@ python ifeval/progco_infer_main_with_python_tool.py --model=gpt-4o-0806 --max_cu
 
 ## 📚 Citation
 
-If you use ProgCo in your research, please cite our work:
+If you find our work helpful, please consider citing it. We greatly appreciate your support.
 
 ```bibtex
 @article{song2025progco,
