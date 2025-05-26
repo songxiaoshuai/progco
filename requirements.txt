@@ -1,0 +1,15 @@
+absl_py==2.1.0
+fire==0.6.0
+Flask==3.1.1
+gevent==24.10.2
+immutabledict==4.2.1
+json5==0.9.25
+jupyter_client==8.6.3
+langdetect==1.0.9
+matplotlib==3.10.3
+nltk==3.8.1
+openai==1.82.0
+Pillow==11.2.1
+Requests==2.32.3
+scikit_learn==1.6.1
+tqdm==4.66.4

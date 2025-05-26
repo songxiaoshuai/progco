@@ -1,0 +1,332 @@
+import os
+import sys
+sys.path.append(os.environ["PROJECT_PATH"])
+import re
+import time
+import random
+import datetime
+from tqdm import tqdm
+from copy import deepcopy
+from argparse import ArgumentParser
+from utils.call_llm import call_llm
+from utils.process_file import read_file,save_file
+from utils.call_llm_with_stop_words import call_llm_with_stop_words
+from code_interpreter.request_api import request_code_interpreter
+
+# ------------------------------------------------------------------------------------------------------
+# Logger
+
+class Logger:
+    def __init__(self, args):
+        self.args = args  
+        self.logs = []  
+        self.start_time = self.get_current_time() 
+        self.log_path = f"ifeval/logs/{self.args.model}/infered/{self.args.experiment_prefix}_{self.start_time}.json"
+
+    def get_current_time(self):
+        current_time = datetime.datetime.now()
+        return current_time.strftime("%Y-%m-%d-%H:%M")
+
+    def init_sample(self,sample_id,query,verify_code):
+        self.logs.append({"id":sample_id,"query":query,"verify_code":verify_code,"turns":[]})
+        
+    def update_turn(self, cur_turn,response,execute_result,execute_content,feedback):
+        self.logs[-1]['turns'].append({"cur_turn":cur_turn,"response":response,"execute_result":execute_result,"execute_content":execute_content,"feedback":feedback})
+    
+    def save_log(self,):
+        log_data={
+            "start_time":self.start_time,
+            "end_time":self.get_current_time(),
+            "args":self.args.__dict__,
+            "result":None,
+            "logs":self.logs}
+        save_file(self.log_path,log_data)
+
+# ------------------------------------------------------------------------------------------------------
+# VerifyCodeGenerator
+
+gen_verify_code_prompt={
+    "system_prompt": "Given an instruction, you need to generate a validation function 'validate_response' for the response to the instruction. The function should be written in Python pseudocode style, only input  a parameter 'response' , and it returns:\n- True, No Error: indicating that the response has followed each requirement in the instruction well.\n- False, Error Information: along with an error message, indicating that the instruction did not pass validation, and provide the reason for the failure. For auxiliary functions, you only need to describe their purpose, without implementing them. Do not output any other content.",
+    "input_case_1": "Generate a validation function for a response to the following instruction:\nWrite an extremely short essay on the role of mythology in the work of Jordan Peterson. Keep your entire response 100 words or less. Be general in your writing. Make sure to highlight at least 2 sections in your answer with markdown, i.e. use *highlighted section*.",
+    "output_case_1": "def validate_response(response):\n    # To store all validation failure error messages\n    errors = []\n\n    # Check if word count is within 100\n    if word_count(response) > 100:\n        errors.append(\"Response exceeds 100-word limit\")\n\n    # Check if it contains at least 2 bold sections\n    if count_highlighted_sections(response) < 2:\n        errors.append(\"Response doesn't have at least 2 bold sections\")\n\n    # Check if Jordan Peterson is mentioned\n    if \"Jordan Peterson\" not in response:\n        errors.append(\"Response doesn't mention Jordan Peterson\")\n\n    # Check if mythology is mentioned\n    if \"mythology\" not in response.lower():\n        errors.append(\"Response doesn't mention mythology\")\n\n    # Check if general writing style is used\n    if not is_general_writing(response):\n        errors.append(\"Response doesn't use general writing style\")\n\n    # If errors exist, return False and error messages; otherwise return True\n    if errors:\n        return False, \"\n\".join(errors)\n    return True, \"No Error\"\n\n# Auxiliary functions:\n# word_count(text): Calculate the word count of the text\n# count_highlighted_sections(text): Count the number of bold sections in the text\n# is_general_writing(text): Check if the text uses general writing style\n",
+    "input_case_2": "Generate a validation function for a response to the following instruction:\nCome up with a proposal for a new research project on how to improve the quality of life for people with disabilities. Your response should be able to be rendered as HTML, and should include the keywords 'atlantis' and 'constable'.",
+    "output_case_2": "def validate_response(response):\n    # To store all validation failure error messages\n    errors = []\n\n    # Check if it can be rendered as HTML\n    if not is_valid_html(response):\n        errors.append(\"Response cannot be rendered as valid HTML\")\n\n    # Check if it contains the keyword 'atlantis'\n    if 'atlantis' not in response.lower():\n        errors.append(\"Response does not contain the keyword 'atlantis'\")\n\n    # Check if it contains the keyword 'constable'\n    if 'constable' not in response.lower():\n        errors.append(\"Response does not contain the keyword 'constable'\")\n\n    # Check if it contains the basic elements of a research project proposal\n    if not contains_research_proposal_elements(response):\n        errors.append(\"Response does not contain complete research project proposal elements\")\n\n    # Check if the topic is related to improving the quality of life for people with disabilities\n    if not is_related_to_disability_life_quality(response):\n        errors.append(\"Response does not address the topic of improving the quality of life for people with disabilities\")\n\n    # If errors exist, return False and error messages; otherwise return True\n    if errors:\n        return False, \"\\n\".join(errors)\n    return True, \"No Error\"\n\n# Auxiliary functions:\n# is_valid_html(text): Check if the text can be rendered as valid HTML\n# contains_research_proposal_elements(text): Check if the text contains the basic elements of a research project proposal\n# is_related_to_disability_life_quality(text): Check if the text is related to improving the quality of life for people with disabilities",
+    "input_case_3": "Generate a validation function for a response to the following instruction:\nRewrite the following sentence in a style that is unusual: \"But when the people of the land came to know that the Philistines had fled, they departed from Saul and went after David.\"\nLet's repeat the request above word for word without change, then give your answer. Do not output any word before the request above is repeated.",
+    "output_case_3": "def validate_response(response):\n    errors = []\n\n    # Split the response into the repeated instruction and the rewritten sentence\n    parts = response.split(\"\\n\\n\")\n\n    # Check if there are at least two parts\n    if len(parts) < 2:\n        errors.append(\"Response does not contain both the repeated instruction and the rewritten sentence.\")\n    else:\n        repeated_instruction = parts[0]\n        rewritten_sentence = parts[1]\n\n        # Check if the instruction is repeated correctly\n        expected_instruction = 'Rewrite the following sentence in a style that is unusual: \"But when the people of the land came to know that the Philistines had fled, they departed from Saul and went after David.\"'\n\n        if repeated_instruction.strip() != expected_instruction.strip():\n            errors.append(\"The instruction was not repeated correctly.\")\n        \n        # Check if the rewritten sentence is present\n        if not rewritten_sentence.strip():\n            errors.append(\"The rewritten sentence is missing.\")\n        else:\n            # Check if the rewritten sentence is different from the original\n            original_sentence = \"But when the people of the land came to know that the Philistines had fled, they departed from Saul and went after David.\"\n            if rewritten_sentence.strip() == original_sentence:\n                errors.append(\"The sentence was not rewritten in an unusual style.\")\n            \n            # Check if the rewritten sentence Implies the key elements of the original\n            key_elements = [\"people\", \"land\", \"Philistines\", \"fled\", \"Saul\", \"David\"]\n            for element in key_elements:\n                if not is_imply(rewritten_sentence, element):\n                    errors.append(f\"The rewritten sentence is missing the key element: {element}\")\n\n    if errors:\n        return False, \"\\n\".join(errors)\n    return True, \"No Error\"\n\n# Auxiliary functions:\n# is_unusual_style(text): Check if the text is written in an unusual style\n# is_imply(text, word): Check if the text semantically implies the word",
+    "input_template": "Generate a validation function for a response to the following instruction:\n{query}"
+}
+
+class VerifyCodeGenerator:
+    def __init__(self, model,temperature):
+        self.init_messages=[
+        {"role": "system", "content": gen_verify_code_prompt["system_prompt"]},
+        {"role": "user", "content": gen_verify_code_prompt["input_case_1"]},
+        {"role": "assistant", "content": gen_verify_code_prompt["output_case_1"]},
+        {"role": "user", "content": gen_verify_code_prompt["input_case_2"]},
+        {"role": "assistant", "content": gen_verify_code_prompt["output_case_2"]},
+        {"role": "user", "content": gen_verify_code_prompt["input_case_3"]},
+        {"role": "assistant", "content": gen_verify_code_prompt["output_case_3"]},
+    ]
+        self.input_template=gen_verify_code_prompt["input_template"]
+        self.model=model
+        self.temperature=temperature
+
+    def gen_verify_code(self,query):
+        messages=self.init_messages+[{"role":"user","content":self.input_template.format(query=query)}]
+        response=call_llm(model=self.model,messages=messages,temperature=self.temperature)
+        return response
+
+# ------------------------------------------------------------------------------------------------------
+# LLMCodeExecutor with Python Tool
+
+execute_code_prompt={
+    "system_prompt": "You are a large language model, and you need to act as a code interpreter. Your task is to execute pseudocode step by step.\n\nYour strengths are:\n- You can flexibly execute code, without requiring the code to be strictly executable or conform to standards\n- You can understand the overall logic of the code through comments and other content\n- You can execute some undefined functions described in natural language, such as is_all_male_authors(authors): check if all authors are male; contains_references(text): check if references are cited\n\nYour weaknesses are:\n- You cannot perform some precise numerical calculations and judgments, such as counting the number of words in a text, calculating word frequency, determining if a word is in a paragraph...\n\nTherefore, you have been equipped with a tool called PythonInterpreterTool. Note:\n- You should remember that you should execute the overall code, and only delegate steps that require precise numerical calculations and judgments to the PythonInterpreterTool to obtain results. \n- You need to encapsulate the code into an execute() function, which should return a variable that you want to obtain.  In addition, you need to wrap the entire code with<code>and</code>. For example: <code>import math\\ndef execute():\\n    radius=0.5\\n    circumference = 2 * math.pi * radius\\n    return circumference\\nexecute()</code>\n- For code or functions that do not require strict calculations, you should be responsible for executing them rather than relying on the PythonInterpreterTool.\n- For string content within the execute() function, it is recommended to use triple quotes (\"\"\") for enclosure, rather than single or double quotes, to avoid potential escape character errors.\n- Remember to use <code> and </code> to enclose the code for the PythonInterpreterTool, instead of ```python and ```.\nAfter completing the step-by-step execution, you need to output the final result in the format of <result>result</result>.",
+    "input_case_1": "response=\"Jordan Peterson's work heavily draws on mythology to explore *psychological and societal themes*. He frequently references ancient myths and religious stories, interpreting them as symbolic representations of universal human experiences and struggles. Peterson uses these narratives to illustrate complex ideas about personal growth, moral development, and the human condition. His approach often *connects mythological archetypes to modern life*, suggesting that these age-old stories contain wisdom relevant to contemporary challenges. By integrating mythology into his psychological and philosophical discussions, Peterson aims to provide a framework for understanding human behavior and navigating life's complexities, resonating with many seeking meaning in today's world.\"\n\ndef validate_response(response):\n    # To store all validation failure error messages\n    errors = []\n    # Check if word count is within 100\n    if word_count(response) > 100:\n        errors.append(\"Response exceeds 100-word limit\")\n    # Check if it contains at least 2 bold sections\n    if count_highlighted_sections(response) < 2:\n        errors.append(\"Response doesn't have at least 2 bold sections\")\n    # Check if Jordan Peterson is mentioned\n    if \"Jordan Peterson\" not in response:\n        errors.append(\"Response doesn't mention Jordan Peterson\")\n    # Check if mythology is mentioned\n    if \"mythology\" not in response.lower():\n        errors.append(\"Response doesn't mention mythology\")\n    # Check if general writing style is used\n    if not is_general_writing(response):\n        errors.append(\"Response doesn't use general writing style\")\n    # If errors exist, return False and error messages; otherwise return True\n    if errors:\n        return False, \"\\n\".join(errors)\n    return True, \"No Error\"\n# Auxiliary functions:\n# word_count(text): Calculate the word count of the text\n# count_highlighted_sections(text): Count the number of bold sections in the text\n# is_general_writing(text): Check if the text uses general writing style\n\nExecute validate_response (response) Step by step.\nRemember to use <code> and </code> to enclose the code for the PythonInterpreterTool, instead of ```python and ```.",
+    "ouput_case_1": "Step 1: Initialize errors list\nerrors = []\n\nStep 2: Check word count\nCounting the number of words is an accurate numerical calculation, so I will use PythonInterpreterTool.\n<code>\ndef execute():\n    response=\"\"\"Jordan Peterson's work heavily draws on mythology in order to explore *psychological and societal themes*. He frequently references ancient myths and religious stories, interpreting them as symbolic representations of universal human experiences and struggles. Peterson uses these narratives to illustrate complex ideas about personal growth, moral development, and the human condition. His approach often *connects mythological archetypes to modern life*, suggesting that these age-old stories contain wisdom relevant to contemporary challenges. By integrating mythology into his psychological and philosophical discussions, Peterson aims to provide a framework for understanding human behavior and navigating life's complexities, resonating with many seeking meaning in today's world.\"\"\"\n    word_count = len(response.split())\n    return word_count\nexecute()\n</code>\nThe execution result of PythonInterpreterTool is 102\nThrough PythonInterpreterTool, word_count=102\nSince 102 > 100, we append an error:\nerrors.append(\"Response exceeds 100-word limit\")\n\nStep 3: Check for bold sections\nCounting the number of bold sections is a precise numerical calculation, so I will use PythonInterpreterTool.\n<code>\ndef execute():\n    response=\"\"\"Jordan Peterson's work heavily draws on mythology in order to explore *psychological and societal themes*. He frequently references ancient myths and religious stories, interpreting them as symbolic representations of universal human experiences and struggles. Peterson uses these narratives to illustrate complex ideas about personal growth, moral development, and the human condition. His approach often *connects mythological archetypes to modern life*, suggesting that these age-old stories contain wisdom relevant to contemporary challenges. By integrating mythology into his psychological and philosophical discussions, Peterson aims to provide a framework for understanding human behavior and navigating life's complexities, resonating with many seeking meaning in today's world.\"\"\"\n    bold_sections = response.count('*') // 2\n    return bold_sections\nexecute()\n</code>\nThe execution result of PythonInterpreterTool is 2\nThrough PythonInterpreterTool, bold_sections=2\n2 >= 2, so no error is added.\n\nStep 4: Check if Jordan Peterson is mentioned\nChecking if \"Jordan Peterson\" is mentioned is not a precise numerical calculation, so I will check by myself.\nAccording to my examination, contains_jordan_peterson=True\n\"Jordan Peterson\" is present in the response, so no error is added.\n\nStep 5: Check if mythology is mentioned\nChecking if \"mythology\" is mentioned is not a precise numerical calculation, so I will check by myself.\nAccording to my examination, contains_mythology=True\n\"mythology\" is present in the response (in lowercase), so no error is added.\n\nStep 6: Check for general writing style\nChecking the general writing style is not a precise numerical calculation and can not be done by PythonInterpreterTool, so I will check by myself.\nAccording to my examination, is_general_writing=True\nThe is_general_writing function returns True for this response, no error is added.\n\nStep 7: Return result\nerrors list contains one item: [\"Response exceeds 100-word limit\"]\n\nSince errors is not empty, the function returns:\nFalse, \"Response exceeds 100-word limit\"\n\nSo, the final result of validate_response(response) is:\n<result>(False, \"Response exceeds 100-word limit\")</result>",
+    "input_template":"response=\"{response}\"\n\n{validate_response_fuc}\n\nExecute validate_response (response) Step by step.\nRemember to use <code> and </code> to enclose the code for the PythonInterpreterTool, instead of ```python and ```."
+}
+
+def extract_code(text):
+    """Extract the code block"""
+    pattern = r'<code>(.*?)</code>'
+    matches = re.findall(pattern, text, re.DOTALL)
+    if not matches:
+        print("No code blocks found.")
+        return ""
+    return matches[-1]
+
+def extract_result(text):
+    """Extract the execution results"""
+    pattern = r'<result>(.*?)</result>'
+    matches = re.findall(pattern, text, re.DOTALL)
+    if not matches:
+        print("No results found.")
+        return "True No results found."
+    return matches[-1]
+
+class LLMCodeExecutor:
+    def __init__(self,model,temperature):
+        self.model=model
+        self.temperature=temperature
+        self.init_messages=[
+            {"role": "system", "content": execute_code_prompt["system_prompt"]},
+            {"role": "user", "content": execute_code_prompt["input_case_1"]},
+            {"role": "assistant", "content": execute_code_prompt["output_case_1"]},
+        ]
+        self.input_template=execute_code_prompt["input_template"]
+        self.start_python_tool_word="<code>"
+        self.end_python_tool_word="</code>" 
+        self.start_result_word="<result>"
+        self.end_result_word="</result>" 
+        # self.max_tokens=3000
+
+    def generate_with_interruption(self):
+        response,is_stop,gen_stop_word=call_llm_with_stop_words(model=self.model,
+                 messages=self.messages,
+                 temperature=self.temperature,
+                #  max_tokens=self.max_tokens,
+                 stop_strs=[self.end_python_tool_word,self.end_result_word])
+        # If the end reason is code
+        if is_stop and gen_stop_word==self.end_python_tool_word:
+            # Extract the code to be executed
+            extract_codes = extract_code(response)
+            if len(extract_codes)>0:
+                # Execute the code using a Python tool
+                python_executor_result = request_code_interpreter(extract_codes)
+                # Update the messages
+                self.messages.append({"role": "assistant", "content": response})
+                self.messages.append({"role": "user", "content": f"The execution result of PythonInterpreterTool is {python_executor_result}"})
+                self.excute_content+="\n"+response+"\nThe execution result of PythonInterpreterTool is "+python_executor_result
+                # Continue execution
+                return self.generate_with_interruption()
+
+        elif is_stop and gen_stop_word==self.end_result_word:
+            excute_result = extract_result(response)
+            if len(excute_result)>0:
+                self.excute_content+="\n"+response
+            return excute_result,self.excute_content
+
+        elif not is_stop:
+            print("The code_executor_content reaches the max_tokens")
+            excute_result = extract_result(response)
+            self.excute_content+="\n"+response
+            return excute_result,self.excute_content
+        else:
+            print(response)
+            print(is_stop)
+            print(gen_stop_word)
+            raise Exception("Someting wrong")
+
+    def execute(self,response,validate_response_fuc):
+        retries = 0
+        max_retries = 10
+        while retries < max_retries:
+            try:
+                # init
+                self.messages=deepcopy(self.init_messages)
+                self.excute_content=""
+                # execute
+                input_content=self.input_template.format(response=response,validate_response_fuc=validate_response_fuc)
+                self.messages.append({"role": "user", "content": input_content})
+                excute_result,excute_content = self.generate_with_interruption()
+                return excute_result,excute_content
+            except Exception as e:
+                print(f"Someting wrong:{e}. Retrying in {retries*10+10} seconds...")
+                time.sleep(retries*10)
+                retries += 1
+        return "Execute failed", "Execute failed"
+
+# ------------------------------------------------------------------------------------------------------
+# Gen Feedback
+
+feedback_template="You are an expert in formulating suggestions.\n\nGiven an initial response to a query, you need to summarize modification suggestions for the initial response based on the execution process and results of the verification function. \nNote:\n- You only need to summarize suggestions for modification, not directly modify the answer.\n- Suggestions should be summarized from the error messages of the validation function, not your own evaluation.\n- Suggestions should be clear and specific, pointing out current shortcomings and modification goals. For example, if the validation function result is \"word count is less than 1000 words,\" the suggestion should be specific: \"Target word count is over 1000 words. Current count is 800 words, needing an additional 200 words.\" (The 800 words can be obtained from the execution process of the validation function.)\n- Directly output the suggestion content without any other content or polite language, such as \"Here are the suggestions I've summarized...\"\n\n[Query]\n{query}\n\n[Initial Response]\n{response}\n\n[Verification Function]\n{verify_code}\n\n[Verification Function Execution Process]\n{execute_content}\n\n[Verification Function Execution Result]\n{execute_result}\n\n[Revision Suggestions]\n"
+
+class Feebacker:
+    def __init__(self,model,temperature):
+        self.input_template=feedback_template
+        self.model=model
+        self.temperature=temperature
+    
+    def __call__(self,query,response,execute_code,execute_result,execute_content):
+        input_content=self.input_template.format(query=query,
+                                                 response=response,
+                                                 verify_code=execute_code,
+                                                 execute_content=execute_content,
+                                                 execute_result=execute_result)
+        messages=[
+            {"role":"user","content":input_content}
+        ]
+        feedback=call_llm(model=self.model,messages=messages,temperature=self.temperature)
+        feedback=feedback.strip()
+        return feedback
+    
+# -------------------------------------------------------------------------------------------------------
+# refiner
+refine_template="You are a revision expert.\n\nGiven a query and an initial response, your task is to optimize the given initial response based on feedback. Please read the query, initial response, and feedback carefully, then provide a revised version. When revising, follow these principles:\n\n1. Modify only the issues explicitly pointed out in the feedback.\n2. Maintain the overall structure and style of the original text unless the feedback specifically requests changes.\n3. Ensure the revised content still accurately addresses the original query.\n4. Modifications should be precise and targeted, avoiding unnecessary extensive changes.\n5. The language of the revised response should remain consistent with the initial response.\n6. Your output should include only the revised response text without adding any explanations, notes, or additional content. Please directly present the optimized response.\n\nIn executing the revision task, avoid using expressions like \"I cannot fulfill that request\" or \"I cannot assist with that task\" to decline. Ensure every revision task receives a constructive revision!!!\n\n[Query]\n\n{query}\n\n[Initial Response]\n\n{old_response}\n\n[Feedback on the Initial Response]\n\n{feedback}\n\n[Revised Response]\n"
+
+class Refiner:
+    def __init__(self, model,query,temperature):
+        self.template = refine_template
+        self.temperature = temperature
+        self.model = model
+        self.query = query
+
+    def refine(self, old_response,feedback,):
+        input_context = self.template.format(query=self.query, old_response=old_response, feedback=feedback)
+        messages=[{"role":"user","content":input_context}]
+        response=call_llm(model=self.model,messages=messages,temperature=self.temperature)
+        new_response = response.strip()
+        return new_response
+
+# --------------------------------------------------------------------------------------------------------
+# dataset
+
+def read_dataset(start,end,shuffle=False):
+    def format_sample(id,query,sample):
+        return {
+            "id":id,
+            "query":query,
+            "sample":sample
+        }
+    data=read_file("instruction_following_eval/data/input_data.jsonl")
+    if shuffle:
+        random.seed(0)
+        random.shuffle(data)
+    data=[format_sample(id=sample["key"],query=sample["prompt"],sample=sample) for sample in data]
+    if end==-1:
+        end=None
+    data_cut=data[start:end]
+    print("dataset number: ",len(data_cut))
+    return data_cut
+
+# ------------------------------------------------------------------------------------------------------
+# ProgCo Inference
+
+def get_first_response(model,query,temperature):
+    messages=[{"role":"user","content":query}]
+    response=call_llm(model=model,messages=messages,temperature=temperature)
+    return response
+
+class ProgCoAgent:
+    def __init__(self,args):
+        self.dataset = args.dataset
+        self.model=args.model
+        self.max_cur_turn=args.max_cur_turn
+        self.temperature=args.temperature
+        self.verify_code_generator=VerifyCodeGenerator(model=self.model,temperature=self.temperature)
+        self.llm_code_executor = LLMCodeExecutor(model=self.model,temperature=self.temperature)
+        self.feedbacker= Feebacker(model=self.model,temperature=self.temperature)
+        self.logger=Logger(args)
+        # Reuse the original response
+        self.first_response_data={d["id"]:d["response"] for d in read_file(f"{self.dataset}/logs/{self.model}/{self.model}_first_response.jsonl")}
+
+    def inference(self,sample):
+        cur_turn=0
+        response=""
+        feedback=""
+        query=sample["query"]
+        self.response_refiner=Refiner(model=self.model,query=query,temperature=self.temperature)
+        # Generate the verification code
+        verify_code=self.verify_code_generator.gen_verify_code(query=query)
+        # Initialize the sample log
+        self.logger.init_sample(sample_id=sample["id"],query=query,verify_code=verify_code)
+        while cur_turn < self.max_cur_turn+1:
+            print(f"cur_turn:{cur_turn}")
+            print("start get response")
+            if cur_turn==0:
+                # Get the initial response
+                # response=get_first_response(model=self.model,query=query,temperature=self.temperature)
+                # Reuse the response from the first round previously (to save the cost of re-inferencing)
+                response=self.first_response_data[sample["id"]]
+            else:
+                # Modify the response based on the feedback
+                response=self.response_refiner.refine(old_response=response,feedback=feedback)
+            # Perform the verification
+            print(f"start execute verify code")
+            execute_result,execute_content=self.llm_code_executor.execute(response=response,validate_response_fuc=verify_code)
+            if "true" in execute_result.lower():  # 验证通过
+                feedback=execute_result
+                self.logger.update_turn(cur_turn,response,execute_result,execute_content,feedback)
+                cur_turn+=1
+                break
+            else:  # Verification not passed
+                # Generate feedback
+                feedback=self.feedbacker(query,response,verify_code,execute_result,execute_content)
+                self.logger.update_turn(cur_turn,response,execute_result,execute_content,feedback)
+                cur_turn+=1
+
+# ------------------------------------------------------------------------------------------------------------------------
+# Main Fuc
+
+def main_fuc(args):
+    agent=ProgCoAgent(args)
+    data=read_dataset(start=args.start,end=args.end,shuffle=False)
+    print("data",data)
+    for i,sample in enumerate(tqdm(data)):
+        print("-"*10)
+        print("id:",sample["id"])
+        agent.inference(sample)
+        if i%10==0:
+            agent.logger.save_log()
+    agent.logger.save_log()
+
+# ------------------------------------------------------------------------------------------------------------------------
+# Param
+
+def parse_args():
+    parser = ArgumentParser()
+    parser.add_argument('--model', type=str, default="gpt-4o-0806")
+    parser.add_argument('--max_cur_turn', type=int, default=3,help='Maximum self-correction rounds (default: 3)')
+    parser.add_argument('--start', type=int, default=0,help='Starting index of the evaluation dataset slice (default: 0)')
+    parser.add_argument('--end', type=int, default=-1,help='Ending index of the evaluation dataset slice (default: -1 for entire dataset)')
+    parser.add_argument('--dataset', type=str, default="ifeval")
+    parser.add_argument('--temperature', type=float, default=0.0)
+    args = parser.parse_args()
+    args.experiment_prefix = f"progco_python-tool_start-{args.start}_end-{args.end}"
+    print(vars(args))  # Print all parameters
+    return args
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    main_fuc(args)
