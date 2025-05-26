@@ -18,12 +18,6 @@ Large Language Models (LLMs) often struggle with effective self-correction in co
 2. **Program-driven Refinement (ProgRe)**  
    Implements dual reflection mechanisms that optimize both responses and verification programs simultaneously, mitigating error propagation.
 
-<div style="text-align:center">
-  <img src="figs/introduction.png" 
-       alt="Verification Pseudo-program Introduction" 
-       style="width:60%; height:auto; display:inline-block"/>
-</div>
-
 <img src="figs/framework.png" 
      alt="ProgCo Framework" 
      style="width:60%; height:auto; display:block; margin:0 auto;" />
