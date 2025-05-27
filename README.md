@@ -1,6 +1,6 @@
 # ProgCo: Program Helps Self-Correction of Large Language Models
 
-![GitHub](https://img.shields.io/badge/license-MIT-blue) ![Paper](https://img.shields.io/badge/Paper-Arxiv-<COLOR>.svg)
+![GitHub](https://img.shields.io/badge/license-Apache-blue) ![Paper](https://img.shields.io/badge/Paper-Arxiv-<COLOR>.svg)
 
 This repository contains the official implementation of ["ProgCo: Program Helps Self-Correction of Large Language Models"](https://arxiv.org/abs/2501.01264), a novel framework that enhances LLMs' self-correction capabilities through program-guided verification and refinement. This paper has been accepted to appear at **ACL 2025** as a **main** conference paper.
 
