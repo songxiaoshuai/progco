@@ -57,8 +57,6 @@ def call_llm(
             stop_strs: Optional[List[str]] = None,
             max_tokens: int = None):
     if model in ['gpt-3.5-turbo','gpt-3.5-16K','gpt-4o-0806','gpt-4o-mini-0718']:
-        if model=='gpt-4o-0806':
-            model='gpt-4o-0806-global'
         response=openai_llm_inference(model,messages,temperature,stop_strs,max_tokens)
     else:
         response=huggingface_llm_inference(model,messages,temperature,stop_strs,max_tokens)
