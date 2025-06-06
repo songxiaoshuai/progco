@@ -52,7 +52,7 @@ export OPENAI_API_KEY="your_api_key"
 export OPENAI_BASE_URL="your_api_base"
 
 # Step 2: Generate Initial Inference Responses
-python MATH/get_first_response.py --model=gpt-4o-0806
+python ifeval/get_first_response.py --model=gpt-4o-0806
 
 # Step 3: Execute ProgCo Main Program
 # Parameters:
